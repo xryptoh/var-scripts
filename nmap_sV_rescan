@@ -1,0 +1,76 @@
+#!/bin/bash
+
+FILE="$1"
+
+if [ -z "$FILE" ]; then
+    echo "Usage: $0 <nmap-oN-report>"
+    exit 1
+fi
+
+mapfile -t HEADERS < <(grep -n "^Nmap scan report for " "$FILE")
+
+extract_ip() {
+    line="$1"
+    ip=$(echo "$line" | grep -oP '\(([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)\)' | tr -d '()')
+    if [ -z "$ip" ]; then
+        ip=$(echo "$line" | grep -oP '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+    fi
+    echo "$ip"
+}
+
+for idx in "${!HEADERS[@]}"; do
+    header="${HEADERS[$idx]}"
+    start_line="${header%%:*}"
+    header_text="${header#*:}"
+
+    if [ $((idx+1)) -lt ${#HEADERS[@]} ]; then
+        next="${HEADERS[$((idx+1))]}"
+        end_line=$(( ${next%%:*} - 1 ))
+    else
+        end_line=$(wc -l < "$FILE")
+    fi
+
+    TARGET=$(extract_ip "$header_text")
+
+    if [ -z "$TARGET" ]; then
+        echo "[-] IP not detected in: $header_text"
+        continue
+    fi
+
+    echo "=== Host: $TARGET ==="
+
+    BLOCK=$(sed -n "${start_line},${end_line}p" "$FILE")
+
+    PORTS=$(
+        echo "$BLOCK" |
+        while IFS='' read -r line; do
+            [ -z "$line" ] && continue
+
+            echo "$line" | grep -q "/tcp" || continue
+
+            clean=$(echo "$line" | tr -s ' \t')
+
+            read -r f1 f2 _ <<< "$clean"
+
+            [ "$f2" = "open" ] || continue
+
+            port="${f1%%/*}"
+            echo "$port"
+
+        done | paste -sd, -
+    )
+
+    if [ -z "$PORTS" ]; then
+        echo "[-] No open ports found"
+        echo
+        continue
+    fi
+
+    echo "[+] Open ports: $PORTS"
+    echo "[+] Running: nmap -sV -p $PORTS $TARGET -oN ${TARGET}_sV.txt"
+    echo
+
+    nmap -sV -p "$PORTS" "$TARGET" -oN "${TARGET}_sV.txt"
+
+    echo
+done
