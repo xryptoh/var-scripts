@@ -68,7 +68,7 @@ export -f test_line
 export TARGET PORT
 
 if command -v parallel >/dev/null 2>&1; then
-    cat "$WORDLIST" | parallel -j "$THREADS" --line-buffer test_line {}
+    cat "$WORDLIST" | parallel -j "$THREADS" -k --group test_line {}
 else
     echo "Warning: GNU parallel not found, using xargs (output may be garbled)."
     cat "$WORDLIST" | xargs -I{} -P "$THREADS" bash -c 'test_line "{}"'
